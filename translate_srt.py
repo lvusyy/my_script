@@ -2,8 +2,8 @@
 
 
 ##
-#利用Google Api 翻译字幕
-#
+#利用Google Api 翻译字幕 (推荐 整个文本进行翻译,这样GOOGLE 可以进行上下文分析,翻译更加的精确.)
+#                        (问题是,整个翻译完成了.怎么确定原文和译文的对应关系???....)
 # by:lvusyy
 #
 # https://github.com/ssut/py-googletrans
