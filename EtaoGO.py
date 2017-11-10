@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 # encoding: utf-8
 
-#
-# 菜鸡,请大神们指点下.
-#
+
 """
 @version: ??
 @author: lvusyy
@@ -19,6 +17,8 @@ import re
 import time
 
 import os
+
+import multiprocessing
 from selenium import webdriver
 import requests
 import sys
@@ -35,21 +35,27 @@ class EtaoGo(object):
     def __init__(self, youName, url=''):
         self.youName = youName
         self.url = url
-        self.webclient = webdriver.Chrome(port=9515)
+        self.webclient = webdriver.Chrome()
 
-    def waitElementRady(self): #等待元素加载完成,最好里面加个条件防止无限循环的出现
+    def waitElementRady(self,times=0):
         try:
             return self.webclient.find_element_by_class_name("act-btn-single")
         except BaseException:
-            return self.waitElementRady()
+            time.sleep(0.2)
+            if times>3:#失败3次就放弃
+                return False
+            return self.waitElementRady(times+1)
 
-    def shuaIt(self, url): #开刷
+
+
+    def shuaIt(self, url):
         self.url = url
-        self.webclient.get(self.url)
-
+        self.webclient.get(url)
         bt = self.waitElementRady()
-
-        bt.click()
+        if bt:
+            bt.click()
+        else:
+            return
         try:
             input_name = self.webclient.find_element_by_xpath(
                 r'//*[@id="draw-popup"]/div[2]/div[1]/div[2]/div[3]/input')
@@ -90,7 +96,7 @@ class Spider(object):
 
     def getMaxPage(self, content):
         '共 9 页'
-        content = content.replace(" ", "")#搜索文字 看一共多少页
+        content = content.replace(" ", "")
         ret = re.search(u'共(\d*)页', content)
         if ret:
             print(ret.group())
@@ -98,7 +104,7 @@ class Spider(object):
 
     def _etaotargetUrl(self, content):
         ret = re.findall(
-            r'(http://drfhj.*[a-zA-Z0-9]{32,50})" target="',#正确的是32位长度,
+            r'(http://drfhj.*[a-zA-Z0-9]{32,50})" target="',
             content)
         if ret:
             return ret
@@ -146,10 +152,28 @@ spiderMainUrls = []
 # load users
 
 
+def go_(name,urls):
+    etg = EtaoGo(name)
+    etg.webclient.implicitly_wait(7)
+    count=0
+    pass_urls=[]
+    # print(name,urls)
+    for etaourl in urls.keys():
+        print("进程 {name} 准备点击 {url}".format(name=etg.youName,url=etg.url))
+        etg.shuaIt(etaourl)
+        time.sleep(.2)
+        pass_urls.append(etaourl)
+        if count>=10:
+            with open("pass.json", 'w') as f:
+                json.dump(pass_urls, f, ensure_ascii=False)
+        else:
+            count+=1
+    with open("pass.json", 'w') as f:
+        json.dump(pass_urls, f, ensure_ascii=False)
 
 def main(forceUpdate=False):
 
-    users, _isForceUpdateEtaoUrl = [], ''#配置文件相关
+    users, _isForceUpdateEtaoUrl = [], ''
     if not os.path.exists('config.ini'):
         conf = configparser.ConfigParser()
         try:
@@ -166,8 +190,8 @@ def main(forceUpdate=False):
             os.remove('config.ini')
             return
 
-    conf = configparser.ConfigParser()#配置文件相关
-    conf.read('config.ini')
+    conf = configparser.ConfigParser()
+    conf.read('config.ini',encoding='utf-8')
     _users = conf.get(conf.sections()[0], 'user')
     _isForceUpdateEtaoUrl = conf.get("users", 'isForceUpdateEtaoUrl')
 
@@ -204,22 +228,8 @@ def main(forceUpdate=False):
 
     else:
         zkbSpider.getEtaoTargetUrl()
-        # t1 = threading.Thread(target=zkbSpider.getEtaoTargetUrl, )
-        # t1.setDaemon(False)
-        # # t1.join()
-        #
-        # t1.run()
-
     if forceUpdate:
         zkbSpider.getEtaoTargetUrl()
-        # t1 = threading.Thread(target=zkbSpider.getEtaoTargetUrl,)
-        # t1.setDaemon(False)
-        # t1.join()
-
-        # t1.run()
-
-    users = []
-    pass_urls = []
 
     if os.path.exists("pass.json"):
         with open('pass.json', 'r') as f:
@@ -229,27 +239,17 @@ def main(forceUpdate=False):
                 pinTuanurls.pop(i)
 
     if len(pinTuanurls) >= 3:
+        max_process=len(names) if not multiprocessing.cpu_count()>len(names) else multiprocessing.cpu_count()
+        Ppool=multiprocessing.Pool(max_process) #加入多进程并发
         for name in names:
             if name:
-                etg = EtaoGo(name)
-                etg.webclient.implicitly_wait(7)
-                users.append(etg)
-                time.sleep(3)
+                Ppool.apply_async(func=go_,args=(name,pinTuanurls))
+                print('创建了处理 {name} 一淘进程'.format(name=name))
 
-        for etaourl in pinTuanurls.keys():
-            for user in users:
-                user.shuaIt(etaourl)
-                time.sleep(.8)
-                pass_urls.append(etaourl)
+        Ppool.close()
+        Ppool.join()
 
-            with open("pass.json", 'w') as f:#把刷过的连接存到新json文件中
-                json.dump(pass_urls, f, ensure_ascii=False)
-
-        for user in users:
-            user.webclient.close()#关闭退出 执行到这里意味着都执行用户都刷完了
-            user.webclient.quit()
-
-    print("一淘连接数不够3条")
+    print("一淘链接的数量不够3条")
 
 
 if __name__ == "__main__":
