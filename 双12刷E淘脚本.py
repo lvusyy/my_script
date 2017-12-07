@@ -20,6 +20,8 @@ import time
 import os
 
 import multiprocessing
+
+import copy
 from selenium import webdriver
 import requests
 import sys
@@ -29,8 +31,53 @@ import configparser
 sys.path.append(os.path.dirname(__file__))
 
 
-pinTuanurls = {}
+class PassUrl(object):
 
+    def __init__(self,passurl='',username=''):
+        self.passurl=passurl
+        self.username=username
+        self.DictPassURL={}
+        self.lock=threading.Lock()
+        dictpassurl=self._load()
+        if dictpassurl and len(dictpassurl)>=2:
+            self.DictPassURL=dictpassurl
+        self.uptimes=0
+    def addPassUrl(self,url,name):
+        ''
+        self.lock.acquire()
+        if url in self.DictPassURL.keys():
+            self.DictPassURL[url].append(name)
+        else:
+            self.DictPassURL[url]=[name,]
+
+        if self.uptimes>=10:
+            self._autoSave()
+            self.uptimes=0
+        else:
+            self.uptimes+=1
+
+        self.lock.release()
+
+    def isPassed(self,url,name):
+        if url in self.DictPassURL.keys():
+            ''
+            if name in self.DictPassURL[url]:
+                return True
+            else:
+                return False
+        else:
+            return False
+
+    def _autoSave(self):
+
+        with open("pass.json", 'w') as f:
+            json.dump(self.DictPassURL, f, ensure_ascii=False)
+
+    def _load(self):
+        ''
+        if os.path.exists("pass.json"):
+            with open("pass.json",'r') as f:
+                return json.load(f)
 
 class EtaoGo(object):
 
@@ -39,6 +86,8 @@ class EtaoGo(object):
         self.url = url
         self.webclient = webdriver.Chrome()
         self.webclient.implicitly_wait(2)
+
+
     def waitElementRady(self,times=0):
         try:
             return self.webclient.find_element_by_class_name("act-btn-single")
@@ -105,7 +154,7 @@ class EtaoGo(object):
 
 class Spider(object):
     def __init__(self, url):
-        self.url = url
+        self.url = url#列表 赚客吧 帖子集合
         self.spider = requests.session()
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.103 Safari/537.36',
@@ -115,6 +164,22 @@ class Spider(object):
             'Connection': 'keep-alive',
         }
         self.spider.headers = self.headers
+        self.ClickUrls=[]
+
+        self.lock=threading.Lock()
+
+    def addUrl(self,list):
+        #枷锁
+        self.lock.acquire()
+        self.ClickUrls.extend(list)
+        self.lock.release()#释放锁
+
+    def getUrls(self):
+        self.lock.acquire()
+        _urls=copy.copy(self.ClickUrls)
+        self.lock.release()
+        return _urls
+
 
     def getContent(self, url):
         if not url:
@@ -134,15 +199,35 @@ class Spider(object):
             return ret.group(1)
 
     def _etaotargetUrl(self, content):
-        ret = re.findall(
-            r'(http://drfhj.*[a-zA-Z0-9]{32,50})" target="',
-            content)
-        if ret:
-            return ret
-
-    def getEtaoTargetUrl(self):
         'http://drfhj.com/my.htm?code=p1j3wKXg48PrWUqRN1AbdpHOMlIAthze'
         '                             n4esFEwIKVOl8jSCMm1H0AWxNnmSlrQ5'
+        urls=[]
+
+        p=[r'(http://drfhj.com/.+[a-zA-Z0-9%]{32,50})"?</td>',r'(http://drfhj.*[a-zA-Z0-9]{32,50})" target="',r'(http://e22a.com/.*)" target=']
+        for r in p:
+            ret = re.findall( r,content)
+            if ret:
+                urls.extend(ret)
+
+        return set(urls)
+
+    def doOnePage(self,_url,_pageNow):
+
+        ret = re.findall(
+            r"(http://www\.zuanke8\.com/thread\-\d+\-)", _url)
+        if ret:
+            _nowurl = ret[0] + str(_pageNow) + '-1.html'
+            content = self.getContent(_nowurl)
+            print(_nowurl)
+            time.sleep(0.2)
+            if not content:
+                return
+            etaoUrl = self._etaotargetUrl(content)
+            self.addUrl(etaoUrl)
+
+    def getEtaoTargetUrl(self):
+
+        threads=[]
         for _url in self.url:
             content = self.getContent(_url)
             if not content:
@@ -150,31 +235,21 @@ class Spider(object):
             page = self.getMaxPage(content)
             if page:
                 for _pageNow in range(1, int(page)):
+                    t=threading.Thread(target=self.doOnePage,args=(_url,_pageNow))
+                    t.setDaemon(True)
+                    t.start()
+                    threads.append(t)
 
-                    ret = re.findall(
-                        r"(http://www\.zuanke8\.com/thread\-\d+\-)", _url)
-                    if ret:
-                        _nowurl = ret[0] + str(_pageNow) + '-1.html'
-                        content = self.getContent(_nowurl)
-                        print(_nowurl)
-                        time.sleep(0.2)
-                        if not content:
-                            continue
-                        etaoUrl = self._etaotargetUrl(content)
-                        time.sleep(0.2)
-                        if etaoUrl and isinstance(etaoUrl, list):
-                            for i in etaoUrl:
-                                pinTuanurls[i] = 0
-                        elif etaoUrl and isinstance(etaoUrl, str):
-                            pinTuanurls[etaoUrl] = 0
-                        time.sleep(0.2)
-                    else:
-                        print(u"传递过来的网页不匹配过滤规则.必须失败!")
-                        exit(0)
+                for _t in threads:
+                    _t.join()
 
-        print(u"解析完成了.共{maxEtaoUrl}条连接".format(maxEtaoUrl=len(pinTuanurls)))
+        print(u"解析完成了.共{maxEtaoUrl}条连接".format(maxEtaoUrl=len(self.getUrls())))
         with open("pintuanurls.json", 'w') as f:
-            json.dump(pinTuanurls, f, ensure_ascii=False)
+            dic_={}
+            for url in self.getUrls():
+                dic_[url]='0'
+
+            json.dump(dic_, f, ensure_ascii=False)
 
 
 
@@ -183,26 +258,20 @@ spiderMainUrls = []
 # load users
 
 
-def go_(name,urls):
+def go_(name,urls,passurl):
     etg = EtaoGo(name)
     etg.webclient.implicitly_wait(3)
-    count=0
-    pass_urls=[]
-    # print(name,urls)
     Procetimes=0
     for etaourl in urls.keys():
+        if passurl.isPassed(url=etaourl,name=name):
+            print(name+" 已经点击过:"+etaourl+" 跳过此链接!")
+            continue
+
         print("进程 {name} 准备点击 {url}".format(name=etg.youName,url=etg.url))
         # webClientRunTimes=etg.shuaIt(etaourl,webClientRunTimes+1)
         Procetimes=etg.shuaIt(etaourl,Procetimes+1)
         time.sleep(.3)
-        pass_urls.append(etaourl)
-        if count>=10:
-            with open("pass.json", 'w') as f:
-                json.dump(pass_urls, f, ensure_ascii=False)
-        else:
-            count+=1
-    with open("pass.json", 'w') as f:
-        json.dump(pass_urls, f, ensure_ascii=False)
+        passurl.addPassUrl(url=etaourl,name=name)
 
 def main(forceUpdate=False):
 
@@ -247,7 +316,7 @@ def main(forceUpdate=False):
     elif names[1] == 'userName2':
         names[1] = ''
 
-    main_urls=['http://www.zuanke8.com/thread-4535621-1-1.html','http://www.zuanke8.com/thread-4535840-1-1.html']
+    main_urls=['http://www.zuanke8.com/thread-4535621-1-1.html','http://www.zuanke8.com/thread-4535840-1-1.html','http://www.zuanke8.com/thread-4536388-1-1.html']
     main_urls.reverse()
     # main_urls = ['http://www.zuanke8.com/thread-4423688-1-1.html', '']
  
@@ -264,12 +333,6 @@ def main(forceUpdate=False):
     if forceUpdate:
         zkbSpider.getEtaoTargetUrl()
 
-    if os.path.exists("pass.json"):
-        with open('pass.json', 'r') as f:
-            etaopass = json.load(f)
-        for i in etaopass:
-            if i in pinTuanurls:
-                pinTuanurls.pop(i)
     threads=[]
     if len(pinTuanurls) >= 3:
         # max_process=len(names) if not multiprocessing.cpu_count()>len(names) else multiprocessing.cpu_count()
@@ -281,16 +344,17 @@ def main(forceUpdate=False):
         #
         # Ppool.close()
         # Ppool.join()
+        pssurl=PassUrl()
         for name in names:
-            t = threading.Thread(target=go_, args=(name, pinTuanurls))
+            t = threading.Thread(target=go_, args=(name, pinTuanurls,pssurl))
             # Ppool.apply_async(func=go_, args=(name, pinTuanurls))
             print('创建了处理 {name} 一淘进程'.format(name=name))
             t.setDaemon(True)
             t.start()
             threads.append(t)
 
-    for t in threads:
-        t.join()
+        for t in threads:
+            t.join()
 
     else:
         print("一淘链接的数量不够3条")
