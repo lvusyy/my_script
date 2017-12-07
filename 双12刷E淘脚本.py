@@ -346,6 +346,9 @@ def main(forceUpdate=False):
         # Ppool.join()
         pssurl=PassUrl()
         for name in names:
+            if not name:
+                continue
+                
             t = threading.Thread(target=go_, args=(name, pinTuanurls,pssurl))
             # Ppool.apply_async(func=go_, args=(name, pinTuanurls))
             print('创建了处理 {name} 一淘进程'.format(name=name))
