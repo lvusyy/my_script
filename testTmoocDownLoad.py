@@ -74,7 +74,7 @@ def merge(file):
     if os.path.exists(os.path.join(dir_, file.split('/')[-2]) +amorpm+ ".mp4"):
         #mp4文件已经合成过了.
         return
-    cmd = "cd " + dir_ + '; ffmpeg -allowed_extensions ALL -protocol_whitelist "file,crypto" -i ' + filename + ' -c copy video.mp4'
+    cmd = "cd " + dir_ + '; ffmpeg -allowed_extensions ALL -protocol_whitelist "file,http,crypto,tcp" -i ' + filename + ' -c copy video.mp4'
     os.system(cmd)
     print(file + " 处理完成!")
     try:
